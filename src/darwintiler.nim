@@ -1,14 +1,13 @@
-import config/config
-import tiling/tiling
-import tables
+import config/config, tiling/tiling
+import tables, os, ospaths
 
 # C Imports and linking
 {.passL: "-framework ApplicationServices"}
 {.passL: "-framework Carbon"}
 
 {.compile: "appservices.c"}
-proc isAuthorized(): cint {.importc}
-proc createAndRunEventLoop(): cint {.importc}
+proc isAuthorized: cint {.importc}
+proc createAndRunEventLoop: cint {.importc}
 
 var pConfig: Config
 
@@ -40,35 +39,39 @@ proc doAction(action: string) =
 
 # Handler for when keys are pressed, called from C.
 # Return 1 to override, 0 to let the event pass
-proc nimLandHandler(keycode: int, repeated: int, modifiers: int): int {.exportc.} =
-  let keyHash = $modifiers & ":" & $keycode
+proc nimLandHandler(keyCode: int, repeated: int, modifiers: int): int {.exportc.} =
+  let keyEvent = KeyEvent(
+    modifiers: modifiers,
+    keyCode: keyCode)
 
-  if pConfig.hasBinding(keyHash):
+  if pConfig.hasBinding(keyEvent):
     # We don't want to do an action on keyrepeat, but we still want to snuff the event
     if repeated == 0:
-      doAction(pConfig.getBinding(keyHash))
-
-    return 1
+      doAction(pConfig.getBinding(keyEvent))
+    else:
+      return 1
   
   return 0
 
-proc Main() =
+proc main() =
+  let configPath = getHomeDir() / ".darwintiler.json"
+
   if isAuthorized() == 0:
     echo "Need accessibility API authorizaton to use this :~)"
     quit()
 
   try:
-    pConfig = loadConfig("~/.darwintiler.json")
+    pConfig = loadConfig(configPath)
 
   except:
-    echo "Couldn't read ~/.darwintiler.json, please create a pConfig file"
-    raise
+    echo "Couldn't read config file at ", configPath, " please create a config file"
+    quit(QuitFailure)
 
   # Create and run the Quartz event tap loop
   let err = createAndRunEventLoop()
 
   if err != 0:
     echo "Failed to initialize Quartz event loop"
-    quit()
+    quit(QuitFailure)
 
-Main()
+main()

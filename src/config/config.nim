@@ -1,59 +1,76 @@
-import tables
-import json
-import strUtils
+import tables, json, strUtils, hashes
 
 {.compile: "bindings.c"}
 proc keyCodeForKeyString(str: cstring): int {.importc}
+
+type Modifier* = enum
+  None = 256,
+
+  Shift = 131330,
+  Ctrl = 262401,
+  Alt = 524576,
+  Cmd = 1048840
+
+type KeyEvent* = object
+  modifiers*: int
+  keyCode*: int
+
+proc hash(keyEvent: KeyEvent): Hash =
+  var h: Hash = 0
+
+  h = h !& hash(keyEvent.modifiers)
+  h = h !& hash(keyEvent.keyCode)
+
+  result = !$h
 
 type Config* = object
   gap*: int
   displayEdgeGap*: int
 
-  bindmap: Table[string, string]
+  bindmap: Table[KeyEvent, string]
 
-proc hasBinding*(s: var Config, keyHash: string): bool =
-  result = s.bindmap.hasKey(keyHash)
+proc hasBinding*(s: Config, keyEvent: KeyEvent): bool =
+  s.bindmap.hasKey(keyEvent)
 
-proc getBinding*(s: var Config, keyHash: string): string =
-  if s.bindmap.hasKey(keyHash):
-    result = s.bindmap[keyHash]
-  else:
-    result = ""
+proc getBinding*(s: Config, keyEvent: KeyEvent): string =
+  s.bindmap.getOrDefault(keyEvent)
 
-proc createKeyHash(inStr: string): string =
-  var modNum = 256
-  var keyNum = 0
+proc parseKeyBinding(inStr: string): KeyEvent =
+  var
+    modifiers = Modifier.None.int
+    keyCode = 0
 
   let tokens = split(inStr, "+")
   
   for token in tokens:
     case token:
-      of "cmd":
-        modNum = modNum or 1048840
       of "shift":
-        modNum = modNum or 131330
-      of "alt":
-        modNum = modNum or 524576
+        modifiers = modifiers or Modifier.Shift.int
       of "control", "ctrl":
-        modNum = modNum or 262401
+        modifiers = modifiers or Modifier.Ctrl.int
+      of "alt":
+        modifiers = modifiers or Modifier.Alt.int
+      of "cmd":
+        modifiers = modifiers or Modifier.Cmd.int
       else:
-        keyNum = keyCodeForKeyString(token)
+        keyCode = keyCodeForKeyString(token)
 
-  return $modNum & ":" & $keyNum
+  KeyEvent(
+    modifiers: modifiers,
+    keyCode: keyCode)
 
 proc loadConfig*(filePath: string): Config =
-  let rootNode = parseFile("filePath")
+  let rootNode = parseFile(filePath)
 
-  var config = Config(
+  result = Config(
     gap: (rootNode["gap"].getNum(12)).int,
     displayEdgeGap: (rootNode["displayEdgeGap"].getNum(6)).int,
 
-    bindMap: initTable[string, string]()
+    bindMap: initTable[KeyEvent, string]()
   )
-  for key, node in rootNode["bindings"]:
+
+  for binding, node in rootNode["bindings"]:
     let action = node.getStr()
-    let keyHash = createKeyHash(key)
+    let keyEvent = parseKeyBinding(binding)
 
-    config.bindmap.add(keyHash, action)
-
-  result = config
+    result.bindmap.add(keyEvent, action)
